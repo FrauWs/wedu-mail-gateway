@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import { ImapFlow } from "imapflow";
 
@@ -39,32 +40,4 @@ app.get("/icloud-test", async (req, res) => {
 
       const items = [];
 
-      for await (const msg of client.fetch(range, {
-        envelope: true,
-        flags: true,
-        internalDate: true,
-      })) {
-        items.push({
-          subject: msg.envelope?.subject || "",
-          from: msg.envelope?.from?.[0]?.address || "",
-          date: msg.internalDate?.toISOString(),
-          seen: msg.flags?.includes("\\Seen"),
-        });
-      }
-
-      return res.json({ ok: true, items });
-    } finally {
-      lock.release();
-    }
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: String(e) });
-  } finally {
-    try {
-      await client.logout();
-    } catch {}
-  }
-});
-
-app.listen(PORT, () => {
-  console.log("Mail-Gateway läuft");
-});
+      for await (const msg of

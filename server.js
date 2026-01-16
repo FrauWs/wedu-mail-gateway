@@ -5,19 +5,26 @@ import { ImapFlow } from "imapflow";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Damit Browser/Proxies nicht "alte" Antworten cachen
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 });
 
-// Eine feste Versionsnummer, damit du im Browser sofort siehst,
-// ob Render wirklich den neuen Code ausliefert:
-const GATEWAY_VERSION = "2026-01-16-v2";
+const GATEWAY_VERSION = "2026-01-16-v3-token";
 
-app.get("/", (req, res) => {
-  res.send(`WEDU Mail Gateway läuft (${GATEWAY_VERSION})`);
-});
+function requireToken(req, res) {
+  const expected = process.env.GATEWAY_TOKEN || "";
+  if (!expected) return true; // wenn nicht gesetzt, ist es offen (nicht empfohlen)
+
+  const got = req.headers["x-gateway-token"] || "";
+  if (got !== expected) {
+    res.status(401).json({ ok: false, error: "Unauthorized (token)" });
+    return false;
+  }
+  return true;
+}
+
+app.get("/", (req, res) => res.send(`WEDU Mail Gateway läuft (${GATEWAY_VERSION})`));
 
 app.get("/version", (req, res) => {
   res.json({
@@ -25,19 +32,18 @@ app.get("/version", (req, res) => {
     version: GATEWAY_VERSION,
     hasUser: Boolean(process.env.ICLOUD_IMAP_USER),
     hasPass: Boolean(process.env.ICLOUD_IMAP_PASS),
+    hasToken: Boolean(process.env.GATEWAY_TOKEN),
   });
 });
 
 app.get("/icloud-test", async (req, res) => {
+  if (!requireToken(req, res)) return;
+
   const user = process.env.ICLOUD_IMAP_USER;
   const pass = process.env.ICLOUD_IMAP_PASS;
 
   if (!user || !pass) {
-    return res.status(500).json({
-      ok: false,
-      error: "iCloud Zugangsdaten fehlen",
-      version: GATEWAY_VERSION,
-    });
+    return res.status(500).json({ ok: false, error: "iCloud Zugangsdaten fehlen", version: GATEWAY_VERSION });
   }
 
   const client = new ImapFlow({
@@ -66,10 +72,8 @@ app.get("/icloud-test", async (req, res) => {
         flags: true,
         internalDate: true,
       })) {
-        // flags ist bei ImapFlow i. d. R. ein Set -> .has() (NICHT includes)
         const flags = msg.flags;
-        const seen =
-          flags && typeof flags.has === "function" ? flags.has("\\Seen") : false;
+        const seen = flags && typeof flags.has === "function" ? flags.has("\\Seen") : false;
 
         const fromObj = msg.envelope?.from?.[0];
         const from =
@@ -86,21 +90,12 @@ app.get("/icloud-test", async (req, res) => {
         });
       }
 
-      return res.json({
-        ok: true,
-        version: GATEWAY_VERSION,
-        totalMessages: total,
-        items,
-      });
+      return res.json({ ok: true, version: GATEWAY_VERSION, totalMessages: total, items });
     } finally {
       lock.release();
     }
   } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      version: GATEWAY_VERSION,
-      error: String(e?.message || e),
-    });
+    return res.status(500).json({ ok: false, version: GATEWAY_VERSION, error: String(e?.message || e) });
   } finally {
     try {
       await client.logout();
@@ -108,6 +103,4 @@ app.get("/icloud-test", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Mail-Gateway läuft (${GATEWAY_VERSION}) auf Port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Mail-Gateway läuft (${GATEWAY_VERSION})`));
